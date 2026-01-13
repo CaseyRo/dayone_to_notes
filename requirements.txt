@@ -1,0 +1,5 @@
+# Day One to Apple Notes Import Tool
+# Python 3.7+ required
+
+# No external dependencies required - uses only standard library
+# osascript is built into macOS
