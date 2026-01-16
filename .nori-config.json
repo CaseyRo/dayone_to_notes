@@ -1,0 +1,11 @@
+{
+  "agents": {
+    "claude-code": {
+      "profile": {
+        "baseProfile": "onboarding-wizard-questionnaire"
+      }
+    }
+  },
+  "version": "19.1.5",
+  "installDir": "/Users/caseyromkes/dev/dayone_to_notes"
+}

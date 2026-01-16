@@ -302,6 +302,23 @@ class NotesCreator:
         escaped = self._escape_applescript_string(html)
         return f'"{escaped}"'
     
+    def _format_creation_date_for_applescript(self, creation_date: str) -> Optional[str]:
+        """Format an ISO-like creation date string for AppleScript's date parser."""
+        if not creation_date:
+            return None
+
+        try:
+            cleaned = creation_date.strip()
+            if cleaned.endswith('Z'):
+                cleaned = cleaned[:-1] + '+00:00'
+            dt = datetime.fromisoformat(cleaned)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            return dt.strftime('%B %d, %Y %I:%M:%S %p')
+        except Exception as e:
+            logger.warning(f"Could not parse creation date '{creation_date}': {e}")
+            return None
+
     def _execute_applescript(self, script: str) -> Tuple[bool, str]:
         """Execute AppleScript and return success status and output."""
         if self.dry_run:
@@ -409,6 +426,33 @@ class NotesCreator:
         script_parts.append(f'make new note at targetFolder with properties {{body:noteBody}}')
         script_parts.append('set newNote to result')
         
+        # Set creation date if provided (fallback to appending date if set fails)
+        if creation_date:
+            formatted_date = self._format_creation_date_for_applescript(creation_date)
+            escaped_original_date = self._escape_applescript_string(creation_date)
+            if formatted_date:
+                escaped_formatted_date = self._escape_applescript_string(formatted_date)
+                script_parts.append(f'''
+                try
+                    set creation date of newNote to date "{escaped_formatted_date}"
+                on error errMsg
+                    log "Failed to set creation date: " & errMsg
+                    set currentBody to body of newNote
+                    set fallbackDate to return & return & "Original date: {escaped_original_date}"
+                    set body of newNote to currentBody & fallbackDate
+                end try
+                ''')
+            else:
+                script_parts.append(f'''
+                try
+                    set currentBody to body of newNote
+                    set fallbackDate to return & return & "Original date: {escaped_original_date}"
+                    set body of newNote to currentBody & fallbackDate
+                on error errMsg
+                    log "Failed to append fallback date: " & errMsg
+                end try
+                ''')
+
         # Add attachments (photos first, then videos, maintaining order)
         all_media = [(p, 'photo') for p in photos] + [(v, 'video') for v in videos]
         for media_path, media_type in all_media:

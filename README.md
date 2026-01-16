@@ -227,7 +227,7 @@ optional arguments:
 
 - One-time import only (no synchronization)
 - Audio attachments are not currently supported
-- Creation date preservation depends on AppleScript capabilities (may fall back to including date in note content)
+- Creation date preservation depends on AppleScript capabilities; if Notes rejects setting the creation date, the original date is appended to the note body
 - Large exports may take significant time to process
 
 ## Examples

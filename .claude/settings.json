@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/caseyromkes/dev/dayone_to_notes/.nori/profiles",
+      "/Users/caseyromkes/dev/dayone_to_notes/.claude/skills"
+    ]
+  }
+}

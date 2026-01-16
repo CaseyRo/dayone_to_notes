@@ -115,6 +115,52 @@ class TestNotesCreator:
 
         assert "Test Note" in creator.created_notes
 
+    def test_create_note_sets_creation_date_script(self, creator_real):
+        """Test that AppleScript includes creation date setting."""
+        captured = {}
+
+        def fake_execute(script):
+            captured["script"] = script
+            return True, "ok"
+
+        creator_real._execute_applescript = fake_execute
+
+        creator_real.create_note(
+            text="Date test note",
+            photos=[],
+            videos=[],
+            tags=[],
+            creation_date="2024-01-15T10:30:00",
+            entry_uuid="DATE1"
+        )
+
+        script = captured.get("script", "")
+        assert "set creation date of newNote" in script
+        assert "Original date:" in script
+
+    def test_create_note_fallback_on_unparseable_date(self, creator_real):
+        """Test that unparseable dates fall back to body append."""
+        captured = {}
+
+        def fake_execute(script):
+            captured["script"] = script
+            return True, "ok"
+
+        creator_real._execute_applescript = fake_execute
+
+        creator_real.create_note(
+            text="Bad date note",
+            photos=[],
+            videos=[],
+            tags=[],
+            creation_date="not-a-date",
+            entry_uuid="DATE2"
+        )
+
+        script = captured.get("script", "")
+        assert "set creation date of newNote" not in script
+        assert "Original date: not-a-date" in script
+
     @patch('subprocess.run')
     def test_execute_applescript_success(self, mock_run, creator_real):
         """Test successful AppleScript execution."""
