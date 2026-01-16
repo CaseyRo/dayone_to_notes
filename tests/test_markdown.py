@@ -84,25 +84,19 @@ class TestMarkdownConverter:
         result = converter.convert(md)
         assert "dayone-moment" not in result
 
-    def test_strip_instagram_urls_when_photos_attached(self, converter):
-        """Test stripping Instagram URLs when has_photo_attachments=True."""
+    def test_preserve_instagram_urls(self, converter):
+        """Test that Instagram URLs are preserved (for link previews)."""
         md = "Cupcake time!\n\nhttps://www.instagram.com/p/VQ9_T/\n\n![](dayone-moment://ABC123)"
-        result = converter.convert(md, has_photo_attachments=True)
-        assert "instagram.com" not in result
+        result = converter.convert(md)
+        assert "instagram.com" in result
         assert "dayone-moment" not in result
         assert "Cupcake time!" in result
 
-    def test_preserve_instagram_urls_when_no_photos(self, converter):
-        """Test that Instagram URLs are preserved when has_photo_attachments=False."""
-        md = "Check this out: https://www.instagram.com/p/VQ9_T/"
-        result = converter.convert(md, has_photo_attachments=False)
-        assert "instagram.com" in result
-
-    def test_strip_instagram_reel_urls(self, converter):
-        """Test stripping Instagram reel URLs."""
+    def test_preserve_instagram_reel_urls(self, converter):
+        """Test that Instagram reel URLs are preserved."""
         md = "Cool reel: https://www.instagram.com/reel/ABC123/"
-        result = converter.convert(md, has_photo_attachments=True)
-        assert "instagram.com" not in result
+        result = converter.convert(md)
+        assert "instagram.com" in result
 
     def test_html_entities_ampersand(self, converter):
         """Test that ampersands are properly escaped."""

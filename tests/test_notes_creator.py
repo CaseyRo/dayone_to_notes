@@ -115,8 +115,8 @@ class TestNotesCreator:
 
         assert "Test Note" in creator.created_notes
 
-    def test_create_note_sets_creation_date_script(self, creator_real):
-        """Test that AppleScript includes creation date setting."""
+    def test_create_note_prepends_formatted_date(self, creator_real):
+        """Test that creation date is prepended to note body."""
         captured = {}
 
         def fake_execute(script):
@@ -135,11 +135,14 @@ class TestNotesCreator:
         )
 
         script = captured.get("script", "")
-        assert "set creation date of newNote" in script
-        assert "Original date:" in script
+        # Date should be prepended with emoji, not set via AppleScript
+        assert "set creation date of newNote" not in script
+        assert "📅" in script
+        assert "January 15, 2024" in script
+        assert "Date test note" in script
 
     def test_create_note_fallback_on_unparseable_date(self, creator_real):
-        """Test that unparseable dates fall back to body append."""
+        """Test that unparseable dates are still prepended with raw date."""
         captured = {}
 
         def fake_execute(script):
@@ -159,7 +162,9 @@ class TestNotesCreator:
 
         script = captured.get("script", "")
         assert "set creation date of newNote" not in script
-        assert "Original date: not-a-date" in script
+        # Raw date should still be prepended with emoji
+        assert "📅 not-a-date" in script
+        assert "Bad date note" in script
 
     @patch('subprocess.run')
     def test_execute_applescript_success(self, mock_run, creator_real):

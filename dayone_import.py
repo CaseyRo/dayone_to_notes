@@ -219,16 +219,10 @@ class MarkdownConverter:
             logger.warning("markdown library not available, using plain text fallback")
             self.md = None
 
-    def convert(self, text: str, has_photo_attachments: bool = False) -> str:
-        """Convert markdown to HTML, with fallback to plain text.
-
-        Args:
-            text: The markdown text to convert
-            has_photo_attachments: If True, strip Instagram URLs since photos are attached
-                                   separately (prevents duplicate images from link previews)
-        """
+    def convert(self, text: str) -> str:
+        """Convert markdown to HTML, with fallback to plain text."""
         # Preprocess: remove Day One specific image references (handled as attachments)
-        text = self._preprocess_dayone_markdown(text, strip_instagram_urls=has_photo_attachments)
+        text = self._preprocess_dayone_markdown(text)
 
         if self.md is None:
             return self._plain_text_to_html(text)
@@ -241,24 +235,11 @@ class MarkdownConverter:
             logger.warning(f"Markdown conversion failed: {e}")
             return self._plain_text_to_html(text)
 
-    def _preprocess_dayone_markdown(self, text: str, strip_instagram_urls: bool = False) -> str:
-        """Remove Day One specific markdown that won't render.
-
-        Args:
-            text: The markdown text to preprocess
-            strip_instagram_urls: If True, also strip Instagram post URLs (useful when
-                                  photos are already attached to avoid duplicate images
-                                  from link previews)
-        """
+    def _preprocess_dayone_markdown(self, text: str) -> str:
+        """Remove Day One specific markdown that won't render."""
         import re
         # Remove Day One image references (handled as attachments)
         text = re.sub(r'!\[.*?\]\(dayone-moment://[^)]+\)', '', text)
-
-        # Optionally strip Instagram URLs to prevent link preview showing duplicate image
-        if strip_instagram_urls:
-            # Match Instagram post/reel URLs: https://instagram.com/p/... or https://www.instagram.com/p/...
-            text = re.sub(r'https?://(?:www\.)?instagram\.com/(?:p|reel)/[^\s\n]+', '', text)
-
         return text
 
     def _plain_text_to_html(self, text: str) -> str:
@@ -286,38 +267,17 @@ class NotesCreator:
         text = text.replace('"', '\\"')
         return text
     
-    def _format_text_for_applescript_body(self, text: str, has_photo_attachments: bool = False) -> str:
+    def _format_text_for_applescript_body(self, text: str) -> str:
         """Format text for AppleScript body assignment, converting markdown to HTML.
 
         Apple Notes body property accepts HTML, which renders headers, bold,
         italic, and lists properly. Raw markdown would display as plain text.
-
-        Args:
-            text: The markdown text to format
-            has_photo_attachments: If True, strip Instagram URLs since photos are attached
         """
         # Convert markdown to HTML
-        html = self.markdown_converter.convert(text, has_photo_attachments=has_photo_attachments)
+        html = self.markdown_converter.convert(text)
         # Escape for AppleScript string
         escaped = self._escape_applescript_string(html)
         return f'"{escaped}"'
-    
-    def _format_creation_date_for_applescript(self, creation_date: str) -> Optional[str]:
-        """Format an ISO-like creation date string for AppleScript's date parser."""
-        if not creation_date:
-            return None
-
-        try:
-            cleaned = creation_date.strip()
-            if cleaned.endswith('Z'):
-                cleaned = cleaned[:-1] + '+00:00'
-            dt = datetime.fromisoformat(cleaned)
-            if dt.tzinfo is not None:
-                dt = dt.astimezone()
-            return dt.strftime('%B %d, %Y %I:%M:%S %p')
-        except Exception as e:
-            logger.warning(f"Could not parse creation date '{creation_date}': {e}")
-            return None
 
     def _execute_applescript(self, script: str) -> Tuple[bool, str]:
         """Execute AppleScript and return success status and output."""
@@ -345,33 +305,57 @@ class NotesCreator:
             return False, str(e)
     
     def check_notes_running(self) -> Tuple[bool, str]:
-        """Check if Apple Notes application is running.
-        
+        """Check if Apple Notes is running, and launch it if not.
+
         Returns:
-            Tuple of (is_running, message). If not running, message contains error details.
+            Tuple of (is_running, message). If launch fails, message contains error details.
         """
         if self.dry_run:
             return True, "dry-run"
-        
-        script = '''
+
+        # Check if Notes is running
+        check_script = '''
         tell application "System Events"
             set notesRunning to (name of processes) contains "Notes"
             return notesRunning
         end tell
         '''
-        
-        success, output = self._execute_applescript(script)
-        
+
+        success, output = self._execute_applescript(check_script)
+
         if not success:
             return False, f"Could not check Notes app status: {output}"
-        
-        # Output should be "true" or "false" as string
+
         is_running = output.strip().lower() == "true"
-        
+
+        if is_running:
+            return True, "Notes app is running"
+
+        # Notes is not running, launch it
+        logger.info("Apple Notes is not running, launching...")
+
+        launch_script = '''
+        tell application "Notes"
+            activate
+        end tell
+        delay 2
+        tell application "System Events"
+            set notesRunning to (name of processes) contains "Notes"
+            return notesRunning
+        end tell
+        '''
+
+        success, output = self._execute_applescript(launch_script)
+
+        if not success:
+            return False, f"Failed to launch Notes app: {output}"
+
+        is_running = output.strip().lower() == "true"
+
         if not is_running:
-            return False, "Apple Notes is not running. Please open Notes app before importing."
-        
-        return True, "Notes app is running"
+            return False, "Notes app failed to launch. Please open it manually and try again."
+
+        return True, "Notes app launched"
     
     def ensure_folder_exists(self) -> bool:
         """Ensure the target folder exists in Apple Notes, creating it if needed."""
@@ -397,61 +381,60 @@ class NotesCreator:
             logger.warning(f"Could not ensure folder '{self.folder_name}' exists: {output}")
         return success
     
-    def create_note(self, text: str, photos: List[Path], videos: List[Path], 
+    def _format_date_for_display(self, creation_date: str) -> Optional[str]:
+        """Format an ISO date string for human-readable display in note body."""
+        if not creation_date:
+            return None
+
+        try:
+            cleaned = creation_date.strip()
+            if cleaned.endswith('Z'):
+                cleaned = cleaned[:-1] + '+00:00'
+            dt = datetime.fromisoformat(cleaned)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            # Format: "May 15, 2023 at 10:30 AM"
+            return dt.strftime('%B %d, %Y at %I:%M %p').replace(' 0', ' ').replace(' at 0', ' at ')
+        except Exception as e:
+            logger.warning(f"Could not parse creation date '{creation_date}': {e}")
+            return None
+
+    def create_note(self, text: str, photos: List[Path], videos: List[Path],
                    tags: List[str], creation_date: Optional[str] = None,
                    entry_uuid: str = '') -> Tuple[bool, str]:
         """Create a note in Apple Notes with text and attachments."""
-        
+
+        # Prepend creation date to note body (Apple Notes doesn't allow setting creation date)
+        if creation_date:
+            formatted_date = self._format_date_for_display(creation_date)
+            if formatted_date:
+                text = f"📅 {formatted_date}\n\n{text}"
+            else:
+                # Fallback to raw date if parsing failed
+                text = f"📅 {creation_date}\n\n{text}"
+
         # Check for duplicates and generate unique title
         title = self._extract_title(text)
         note_title = self._get_unique_title(title)
-        
+
         # Ensure folder exists
         if self.folder_name:
             self.ensure_folder_exists()
-        
+
         # Build AppleScript
         script_parts = ['tell application "Notes"']
-        
+
         # Get or create folder
         if self.folder_name:
             script_parts.append(f'set targetFolder to folder "{self.folder_name}"')
         else:
             script_parts.append('set targetFolder to folder 1')  # Default folder
-        
+
         # Create note with properly formatted text (preserves newlines and markdown)
-        # Strip Instagram URLs when photos are attached to prevent duplicate images from link previews
-        body_text_expr = self._format_text_for_applescript_body(text, has_photo_attachments=bool(photos))
+        body_text_expr = self._format_text_for_applescript_body(text)
         script_parts.append(f'set noteBody to {body_text_expr}')
         script_parts.append(f'make new note at targetFolder with properties {{body:noteBody}}')
         script_parts.append('set newNote to result')
-        
-        # Set creation date if provided (fallback to appending date if set fails)
-        if creation_date:
-            formatted_date = self._format_creation_date_for_applescript(creation_date)
-            escaped_original_date = self._escape_applescript_string(creation_date)
-            if formatted_date:
-                escaped_formatted_date = self._escape_applescript_string(formatted_date)
-                script_parts.append(f'''
-                try
-                    set creation date of newNote to date "{escaped_formatted_date}"
-                on error errMsg
-                    log "Failed to set creation date: " & errMsg
-                    set currentBody to body of newNote
-                    set fallbackDate to return & return & "Original date: {escaped_original_date}"
-                    set body of newNote to currentBody & fallbackDate
-                end try
-                ''')
-            else:
-                script_parts.append(f'''
-                try
-                    set currentBody to body of newNote
-                    set fallbackDate to return & return & "Original date: {escaped_original_date}"
-                    set body of newNote to currentBody & fallbackDate
-                on error errMsg
-                    log "Failed to append fallback date: " & errMsg
-                end try
-                ''')
 
         # Add attachments (photos first, then videos, maintaining order)
         all_media = [(p, 'photo') for p in photos] + [(v, 'video') for v in videos]
@@ -569,7 +552,7 @@ class DayOneImporter:
     
     def import_all(self):
         """Import all entries from selected JSON files."""
-        # Pre-flight check: Verify Notes app is running
+        # Pre-flight check: Ensure Notes app is running (launches if needed)
         is_running, message = self.notes_creator.check_notes_running()
         if not is_running:
             error_msg = f"Pre-import check failed: {message}"
@@ -581,6 +564,13 @@ class DayOneImporter:
                 print(f"\nError: {error_msg}")
                 print("Please open Apple Notes app and try again.")
             raise RuntimeError(error_msg)
+
+        # Log if Notes was launched
+        if message == "Notes app launched":
+            if self.use_tui and self.console:
+                self.console.print("[green]Launched Apple Notes[/green]")
+            else:
+                logger.info("Launched Apple Notes")
         
         if self.use_tui:
             self._import_with_tui()
